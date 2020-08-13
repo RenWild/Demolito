@@ -34,7 +34,7 @@ void bench(int depth)
     uint64_t nodes = 0, seal = 0;
     uciChess960 = true;
 
-    memset(&lim, 0, sizeof(lim));
+    lim = (Limits){0};
     lim.depth = depth;
 
     int64_t start = system_msec();
@@ -46,7 +46,7 @@ void bench(int depth)
 
         puts(fens[i]);
         nodes += search_go();
-        seal = hash(&nodes, sizeof nodes, seal);
+        hash_block(nodes, &seal);
         puts("");
     }
 
@@ -55,7 +55,7 @@ void bench(int depth)
 
     const int64_t elapsed = system_msec() - start;
 
-    seal = hash(HashTable, HashCount * sizeof(HashEntry), seal);  // sign entire hash table
+    hash_blocks(HashTable, HashCount * sizeof(HashEntry), &seal);  // sign entire hash table
 
     printf("seal  : %" PRIx64 "\n", seal);  // strong functionality signature
     printf("time  : %" PRIu64 "ms\n", elapsed);
@@ -73,10 +73,10 @@ int main(int argc, char **argv)
             const int depth = argc > 2 ? atoi(argv[2]) : 12;
 
             if (argc > 3)
-                WorkersCount = atoi(argv[3]);
+                WorkersCount = (size_t)atoll(argv[3]);
 
             if (argc > 4)
-                uciHash = 1ULL << bb_msb(atoll(argv[4]));  // must be a power of 2
+                uciHash = 1ULL << bb_msb((uint64_t)atoll(argv[4]));  // must be a power of 2
 
             workers_prepare(WorkersCount);
             hash_prepare(uciHash);

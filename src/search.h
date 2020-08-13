@@ -1,3 +1,17 @@
+/*
+ * Demolito, a UCI chess engine. Copyright 2015-2020 lucasart.
+ *
+ * Demolito is free software: you can redistribute it and/or modify it under the terms of the GNU
+ * General Public License as published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * Demolito is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+ * even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along with this program. If
+ * not, see <http://www.gnu.org/licenses/>.
+*/
 #pragma once
 #include <stdatomic.h>
 #include "position.h"
@@ -9,7 +23,8 @@ enum {
 };
 
 typedef struct {
-    int64_t movetime, time, inc, nodes;
+    int64_t movetime, time, inc;
+    uint64_t nodes;
     int depth, movestogo;
     atomic_bool infinite;  // IO thread can change this while Timer thread is checking it
 } Limits;
@@ -25,5 +40,6 @@ extern ZobristStack rootStack;
 extern Limits lim;
 extern int Contempt;
 
-void search_init();
-int64_t search_go();
+void search_init(void);
+uint64_t search_go(void);
+void *search_posix(void *);  // POSIX wrapper for pthread_create()

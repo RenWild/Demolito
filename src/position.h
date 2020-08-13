@@ -1,11 +1,22 @@
+/*
+ * Demolito, a UCI chess engine. Copyright 2015-2020 lucasart.
+ *
+ * Demolito is free software: you can redistribute it and/or modify it under the terms of the GNU
+ * General Public License as published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * Demolito is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+ * even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along with this program. If
+ * not, see <http://www.gnu.org/licenses/>.
+*/
 #pragma once
 #include "bitboard.h"
 #include "pst.h"
 
 enum {MATE = 32000};
-
-#define min(x, y) ((x) < (y) ? (x) : (y))
-#define max(x, y) ((x) > (y) ? (x) : (y))
 
 // Max number of bytes needed to store a FEN
 enum {MAX_FEN = 64 + 8 + 2 + 5 + 3 + 4 + 4 + 1};
@@ -45,7 +56,6 @@ bitboard_t pos_ep_square_bb(const Position *pos);
 bool pos_insufficient_material(const Position *pos);
 int pos_king_square(const Position *pos, int color);
 int pos_color_on(const Position *pos, int square);
-int pos_piece_on(const Position *pos, int square);
 bitboard_t pos_attackers_to(const Position *pos, int square, bitboard_t occ);
 bitboard_t calc_pins(const Position *pos);
 

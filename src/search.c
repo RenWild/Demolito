@@ -26,9 +26,6 @@ Position rootPos;
 ZobristStack rootStack;
 Limits lim;
 
-// Protect thread scheduling decisions
-static mtx_t mtxSchedule;
-
 atomic_bool Stop;  // Stop signal raised by timer or master thread, and observed by workers
 
 int Contempt = 10;
@@ -95,8 +92,6 @@ static int qsearch(Worker *worker, const Position *pos, int ply, int depth, int 
            : zobrist_move_key(&worker->stack, 0) == ZobristTurn ? -worker->eval[ply - 1] + 2 * Tempo
            : evaluate(worker, pos) + Tempo;
     }
-
-    worker->nodes++;
 
     if (ply >= MAX_PLY)
         return refinedEval;
@@ -207,6 +202,7 @@ static int search(Worker *worker, const Position *pos, int ply, int depth, int a
         {0, 0, 0, 0, -179, -358},  // quiet
         {0, -33, -132, -297, -528, -825}  // capture
     };
+    static const int ProbcutMargin = 300;
 
     assert(depth > 0);
     assert(zobrist_back(&worker->stack) == pos->key);
@@ -257,8 +253,6 @@ static int search(Worker *worker, const Position *pos, int ply, int depth, int a
     if (ply == 0 && info_last_depth(&ui) > 0)
         he.move = info_best(&ui);
 
-    worker->nodes++;
-
     if (ply >= MAX_PLY)
         return refinedEval;
 
@@ -303,11 +297,48 @@ static int search(Worker *worker, const Position *pos, int ply, int depth, int a
             return score >= mate_in(MAX_PLY) ? beta : score;
     }
 
-    // Generate and score moves
     Sort sort;
+    const bitboard_t pins = calc_pins(pos);
+
+    // Prob cut
+    if (depth >= 5 && !pvNode && !pos->checkers && beta + ProbcutMargin <= MATE) {
+        const int ubound = beta + ProbcutMargin;
+
+        // Generate captures only. HACK: depth=0 && !pos->checkers fools sort_init() to think we're
+        // doing a qsearch capture generation.
+        sort_init(worker, &sort, pos, 0, he.move);
+
+        while (sort.idx != sort.cnt) {
+            int see;
+            const move_t capture = sort_next(&sort, pos, &see);
+
+            // Skip if move is illegal or singular (excluded from search at this node)
+            if (!gen_is_legal(pos, pins, capture) || capture == singularMove)
+                continue;
+
+            // If SEE <= 0, we're done, since captures are sorted by descending SEE, and we only
+            // want to search winning captures (SEE > 0).
+            if (see < ubound - worker->eval[ply])
+                break;
+
+            // Play the move
+            pos_move(&nextPos, pos, capture);
+            zobrist_push(&worker->stack, nextPos.key);
+
+            // Reduced search on [ubound-1, ubound] <=> [-ubound,-ubound+1] for opponent
+            score = -search(worker, &nextPos, ply + 1, depth - 4, -ubound, -ubound + 1, childPv, 0);
+
+            // Undo the move
+            zobrist_pop(&worker->stack);
+
+            if (score >= ubound)
+                return score;
+        }
+    }
+
+    // Generate and score moves
     sort_init(worker, &sort, pos, depth, he.move);
 
-    const bitboard_t pins = calc_pins(pos);
     int moveCount = 0, lmrCount = 0;
     move_t quietSearched[MAX_MOVES];
     int quietSearchedCnt = 0;
@@ -344,6 +375,10 @@ static int search(Worker *worker, const Position *pos, int ply, int depth, int a
 
             // Late Move Pruning
             if (!capture && depth <= 4 && moveCount >= 3 * depth + 2 * improving)
+                break;
+
+            // Prune quiet moves with negative history (excluding 1st move)
+            if (!capture && depth <= 3 && moveCount >= 2 && sort.scores[sort.idx - 1] < 0)
                 break;
         }
 
@@ -451,8 +486,8 @@ static int search(Worker *worker, const Position *pos, int ply, int depth, int a
             const int from = move_from(quietSearched[i]), to = move_to(quietSearched[i]);
 
             history_update(&worker->history[us][from][to], bonus);
-            history_update(&worker->refutationHistory[rhIdx][pos_piece_on(pos, from)][to], bonus);
-            history_update(&worker->followUpHistory[fuhIdx][pos_piece_on(pos, from)][to], bonus);
+            history_update(&worker->refutationHistory[rhIdx][pos->pieceOn[from]][to], bonus);
+            history_update(&worker->followUpHistory[fuhIdx][pos->pieceOn[from]][to], bonus);
         }
     }
 
@@ -478,7 +513,7 @@ static int aspirate(Worker *worker, int depth, move_t pv[], int score)
     int alpha = max(score - delta, -MATE);
     int beta = min(score + delta, MATE);
 
-    for ( ; ; delta *= 1.876) {
+    for ( ; ; delta += delta / 2) {
         score = search(worker, &rootPos, 0, depth, alpha, beta, pv, 0);
 
         if (score <= alpha) {
@@ -492,33 +527,13 @@ static int aspirate(Worker *worker, int depth, move_t pv[], int score)
     }
 }
 
-static void iterate(Worker *worker)
+void *iterate(void *_worker)
 {
+    Worker *worker = _worker;
     move_t pv[MAX_PLY + 1];
     int volatile score = 0;
 
     for (volatile int depth = 1; depth <= lim.depth; depth++) {
-        // If half of the threads are searching >= depth, then move to the next depth.
-        // Special cases where this does not apply:
-        // depth == 1: we want all threads to finish depth == 1 asap.
-        // depth == lim.depth: there is no next depth.
-        mtx_lock(&mtxSchedule);
-
-        if (WorkersCount >= 2 && depth >= 2 && depth < lim.depth) {
-            int cnt = 0;
-
-            for (int i = 0; i < WorkersCount; i++)
-                cnt += worker != &Workers[i] && Workers[i].depth >= depth;
-
-            if (cnt >= WorkersCount / 2) {
-                mtx_unlock(&mtxSchedule);
-                continue;
-            }
-        }
-
-        worker->depth = depth;
-        mtx_unlock(&mtxSchedule);
-
         if (!setjmp(worker->jbuf))
             score = aspirate(worker, depth, pv, score);
         else {
@@ -533,6 +548,8 @@ static void iterate(Worker *worker)
     // or pondering, in which case workers wait here, and the timer loop continues until stopped.
     if (!lim.infinite)
         Stop = true;
+
+    return NULL;
 }
 
 int mated_in(int ply)
@@ -551,12 +568,11 @@ bool is_mate_score(int score)
     return abs(score) >= MATE - MAX_PLY;
 }
 
-int64_t search_go()
+uint64_t search_go()
 {
     int64_t start = system_msec();
 
     info_create(&ui);
-    mtx_init(&mtxSchedule, mtx_plain);
     Stop = false;
 
     hashDate++;
@@ -566,14 +582,14 @@ int64_t search_go()
     int minTime = 0, maxTime = 0;  // Silence bogus gcc warning (maybe uninitialized)
 
     if (!lim.movetime && (lim.time || lim.inc)) {
-        const int movesToGo = lim.movestogo ? 0.5 + pow(lim.movestogo, 0.9) : 26;
+        const int movesToGo = lim.movestogo ? lim.movestogo : 26;
         const int remaining = (movesToGo - 1) * lim.inc + lim.time;
 
         minTime = min(0.57 * remaining / movesToGo, lim.time - uciTimeBuffer);
         maxTime = min(2.21 * remaining / movesToGo, lim.time - uciTimeBuffer);
     }
 
-    for (int i = 0; i < WorkersCount; i++)
+    for (size_t i = 0; i < WorkersCount; i++)
         // Start searching thread
         pthread_create(&threads[i], NULL, (void*(*)(void*))iterate, &Workers[i]);
 
@@ -596,12 +612,18 @@ int64_t search_go()
         }
     } while (!atomic_load_explicit(&Stop, memory_order_acquire));
 
-    for (int i = 0; i < WorkersCount; i++)
+    for (size_t i = 0; i < WorkersCount; i++)
         pthread_join(threads[i], NULL);
 
     info_print_bestmove(&ui);
     info_destroy(&ui);
-    mtx_destroy(&mtxSchedule);
 
     return workers_nodes();
+}
+
+void *search_posix(void *dummy)
+{
+    (void)dummy;  // silence compiler warning (unused variable)
+    search_go();
+    return NULL;
 }

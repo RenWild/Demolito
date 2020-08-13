@@ -3,7 +3,8 @@
 Demolito is a [UCI](http://www.shredderchess.com/chess-info/features/uci-universal-chess-interface.html)
 chess engine written in [C](https://en.wikipedia.org/wiki/C_(programming_language)). As such, it is
 a command line program, which is not designed to be used directly, but instead through an UCI capable
-UI, such as [CuteChess](http://github.com/cutechess/cutechess.git) or [Banksia](https://banksiagui.com/).
+UI, such as [CuteChess](http://github.com/cutechess/cutechess.git) or [Banksia](https://banksiagui.com/),
+or [c-chess-cli](https://github.com/lucasart/c-chess-cli.git).
 
 ### Versions
 
@@ -51,7 +52,7 @@ are not reproducible.
 
 ### What do you need ?
 
-- clang
+- clang or gcc
 - make
 - git
 
@@ -64,7 +65,7 @@ cd Demolito/src
 make CC=clang pext  # for Intel Haswell+ only
 make CC=clang       # for AMD or older Intel
 ```
-You can use gcc instead of clang, but Demolito will be significantly slower (hence weaker).
+You can use gcc instead of clang, but Demolito will be a bit slower (hence weaker).
 
 ### How to verify ?
 

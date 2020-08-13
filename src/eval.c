@@ -56,7 +56,7 @@ static eval_t mobility(const Position *pos, int us, bitboard_t attacks[NB_COLOR]
     bitboard_t occ = pos_pieces(pos) ^ rookMovers;  // RQ see through each other
 
     while (rookMovers) {
-        const int from = bb_pop_lsb(&rookMovers), piece = pos_piece_on(pos, from);
+        const int from = bb_pop_lsb(&rookMovers), piece = pos->pieceOn[from];
         const bitboard_t targets = bb_rook_attacks(from, occ);
         attacks[us][piece] |= targets;
         eval_add(&result, Mobility[2 * piece - ROOK][bb_count(targets & available)]);
@@ -67,7 +67,7 @@ static eval_t mobility(const Position *pos, int us, bitboard_t attacks[NB_COLOR]
     occ = pos_pieces(pos) ^ bishopMovers;  // BQ see through each other
 
     while (bishopMovers) {
-        const int from = bb_pop_lsb(&bishopMovers), piece = pos_piece_on(pos, from);
+        const int from = bb_pop_lsb(&bishopMovers), piece = pos->pieceOn[from];
         const bitboard_t targets = bb_bishop_attacks(from, occ);
         attacks[us][piece] |= targets;
         eval_add(&result, Mobility[piece][bb_count(targets & available)]);
@@ -119,7 +119,7 @@ static eval_t hanging(const Position *pos, int us, bitboard_t attacks[NB_COLOR][
         & ~(attacks[us][PAWN] | attacks[us][KING] | attacks[us][NB_PIECE]);
 
     while (b) {
-        const int piece = pos_piece_on(pos, bb_pop_lsb(&b));
+        const int piece = pos->pieceOn[bb_pop_lsb(&b)];
         assert(piece == PAWN || (KNIGHT <= piece && piece <= QUEEN));
         result.op -= Hanging[piece];
     }
@@ -342,10 +342,12 @@ void eval_init()
         }
 
     // Validate above calculations in debug mode
-    assert(hash(PawnSpan, sizeof PawnSpan, 0) == 0xf37ce76e0d1d482d);
-    assert(hash(PawnPath, sizeof PawnPath, 0) == 0x80b84ae07e7410bf);
-    assert(hash(AdjacentFiles, sizeof AdjacentFiles, 0) == 0x911aee29d6082d4b);
-    assert(hash(KingDistance, sizeof KingDistance, 0) == 0x1a7eaa139d03d9ca);
+    uint64_t h = 0;
+    hash_blocks(PawnSpan, sizeof PawnSpan, &h);
+    hash_blocks(PawnPath, sizeof PawnPath, &h);
+    hash_blocks(AdjacentFiles, sizeof AdjacentFiles, &h);
+    hash_blocks(KingDistance, sizeof KingDistance, &h);
+    assert(h == 0x9f29705ba9ca230);
 
     for (int i = 0; i < 4096; i++) {
         const int x = pow((double)i, SafetyCurveParam[0] * 0.001) + 0.5;
@@ -355,6 +357,8 @@ void eval_init()
 
 int evaluate(Worker *worker, const Position *pos)
 {
+    worker->nodes++;
+
     assert(!pos->checkers);
     const int us = pos->turn, them = opposite(us);
     eval_t e[NB_COLOR] = {pos->pst, {0, 0}};
